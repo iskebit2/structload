@@ -62,7 +62,20 @@ proje_data = {
 "F1": 1.5,
 "Sds": 0.169,
 "Sd1": 0.081
-}
+},
+"load_cases": [
+"EQX",
+"EQY",
+"QUAKEX",
+"QUAKEY"
+],
+"drift_combo_names": [
+"EXP",
+"EXM",
+"EYP",
+"EYM"
+]
+
 },
 
 "malzemeler": {
@@ -128,21 +141,7 @@ proje_data = {
 "wind_load_cases": [],
 "wind_load_combs": [],
 "snow_load_cases": [],
-"snow_load_combs": [],
-
-"seismic_load_cases": [
-"EQX",
-"EQY",
-"QUAKEX",
-"QUAKEY"
-],
-"drift_combo_names": [
-"EXP",
-"EXM",
-"EYP",
-"EYM"
-]
-               
+"snow_load_combs": []
 }
 }
 }

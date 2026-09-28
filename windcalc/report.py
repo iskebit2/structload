@@ -1,28 +1,154 @@
+import io
 import numpy as np
 import pandas as pd
+from PIL import Image as PILImage, ImageDraw, ImageFont
 
-import io
-from typing import Iterable, Optional, Dict, List, Tuple, Any
-from dataclasses import dataclass, field
-
-from data.wind_data import CPI_NEGATIVE, CPI_POSITIVE, TOL, WindRelation
+from data.wind_data import CPI_NEGATIVE, CPI_POSITIVE
 from utils.report_dataframe import ReportDataFrame
-from windcalc.surface import Surface
-from windcalc.windengine import WindEngine
-from windcalc.zone_generator import _get_roof_zones, _get_wall_zones
-from docx.shared import Cm
-import matplotlib
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-from matplotlib.lines import Line2D
-from math import isclose
 
 
+def image_to_bytes(image):
+    stream = io.BytesIO()
+    image.save(stream, format="PNG")
+    stream.seek(0)
+    return stream
 
+
+def show_zones(zones, building, size=800):
+    zone_records = []
+    cpe10_values = []
+
+    for zone_obj in zones:
+        coords = np.asarray(zone_obj.coords, dtype=float)
+        cpe = zone_obj.cpe10
+        current_cpe = float(cpe[0] if isinstance(cpe, (tuple, list, np.ndarray)) else cpe)
+        
+        zone_records.append((coords, zone_obj.label, current_cpe))
+        cpe10_values.append(current_cpe)
+
+    if not zone_records:
+        raise ValueError("all_wind_zones boş!")
+
+    b_coords = np.asarray(list(building.points.values()), dtype=float)
+    min_b = b_coords.min(axis=0)
+    max_b = b_coords.max(axis=0)
+    mid_b = (min_b + max_b) / 2.0
+
+    all_coords = np.vstack([r[0] for r in zone_records])
+    mins = all_coords.min(axis=0)
+    maxs = all_coords.max(axis=0)
+    
+    ranges = maxs - mins
+    max_range = max(float(ranges.max()), 1.0)
+    mid = (mins + maxs) / 2.0
+
+    def project(p):
+        x, y, z = p - mid
+        sx = x - y
+        sy = z - (x + y) * 0.5
+        return sx, sy
+
+    projected = [(np.array([project(p) for p in coords]), label, cpe) for coords, label, cpe in zone_records]
+
+    all_2d = np.vstack([p for p, _, _ in projected])
+    min_x, min_y = all_2d.min(axis=0)
+    max_x, max_y = all_2d.max(axis=0)
+
+    range_x = max(max_x - min_x, 1e-9)
+    range_y = max(max_y - min_y, 1e-9)
+
+    margin = 80
+    scale = min((size - 2 * margin) / range_x, (size - 2 * margin) / range_y)
+
+    def screen(p):
+        sx = margin + (p[0] - min_x) * scale
+        sy = size - margin - (p[1] - min_y) * scale
+        return int(sx), int(sy)
+
+    image = PILImage.new("RGBA", (size, size), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(image)
+
+    neg = [v for v in cpe10_values if v < 0]
+    pos = [v for v in cpe10_values if v > 0]
+    max_neg = max([abs(v) for v in neg], default=1.0)
+    max_pos = max(pos, default=1.0)
+
+    def zone_color(cpe):
+        if cpe < 0:
+            t = min(abs(cpe) / max_neg, 1.0)
+            return int(220 - 180 * t), int(235 - 150 * t), int(250 - 40 * t), 180
+        if cpe > 0:
+            t = min(cpe / max_pos, 1.0)
+            return 255, int(225 - 180 * t), int(225 - 180 * t), 180
+        return 220, 220, 220, 180
+
+    try:
+        font = ImageFont.truetype("arial.ttf", 22)
+    except OSError:
+        font = ImageFont.load_default()
+
+    for pts, label, cpe in projected:
+        polygon = [screen(p) for p in pts]
+        fill = zone_color(cpe)
+
+        draw.polygon(polygon, fill=fill)
+        draw.line(polygon + [polygon[0]], fill=(40, 40, 40, 255), width=2)
+
+        centroid = pts.mean(axis=0)
+        cx, cy = screen(centroid)
+
+        text = f"{label} ({cpe:.2f})"
+        bbox = draw.textbbox((0, 0), text, font=font)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        pad = 5
+
+        draw.rounded_rectangle(
+            (cx - tw // 2 - pad, cy - th // 2 - pad, cx + tw // 2 + pad, cy + th // 2 + pad),
+            radius=5,
+            fill=(255, 255, 255, 180),
+            outline=(100, 100, 100, 180),
+            width=1,
+        )
+
+        draw.text((cx - tw // 2, cy - th // 2), text, font=font, fill=(0, 0, 0, 255))
+
+    wind_vector = np.asarray(building.w_dir, dtype=float)
+    norm = np.linalg.norm(wind_vector)
+    wind_dir = wind_vector / norm if norm >= 1e-9 else np.array([1.0, 0.0, 0.0])
+
+    arrow_length = max_range / 3.0
+    start = mid_b.copy()
+
+    dominant_axis = int(np.argmax(np.abs(wind_dir)))
+    sign = np.sign(wind_dir[dominant_axis])
+    b_size = max_b - min_b
+
+    start[dominant_axis] = mid_b[dominant_axis] - sign * b_size[dominant_axis] / 2.0 - sign * arrow_length * 0.5
+    end = start + wind_dir * arrow_length
+
+    p1 = screen(project(start))
+    p2 = screen(project(end))
+
+    draw.line([p1, p2], fill=(220, 30, 30, 255), width=6)
+
+    dx, dy = p2[0] - p1[0], p2[1] - p1[1]
+    length = np.hypot(dx, dy)
+
+    if length > 1e-9:
+        ux, uy = dx / length, dy / length
+        size_arrow = 25
+        left = (p2[0] - ux * size_arrow - uy * size_arrow * 0.5, p2[1] - uy * size_arrow + ux * size_arrow * 0.5)
+        right = (p2[0] - ux * size_arrow + uy * size_arrow * 0.5, p2[1] - uy * size_arrow - ux * size_arrow * 0.5)
+        draw.polygon([p2, left, right], fill=(220, 30, 30, 255))
+
+    img_stream = io.BytesIO()
+    image.save(img_stream, format="PNG")
+    img_stream.seek(0)
+
+    return image
 
 
 def get_parameters_report(building) -> ReportDataFrame:
-    summary = building.report()
     h = building.geometry.get("h", 1)
     z_ref = max(h, building.zmin)
 
@@ -44,10 +170,7 @@ def get_parameters_report(building) -> ReportDataFrame:
         ("İç Basınç (-)", f"{CPI_NEGATIVE:.2f}"),
     ]
 
-    data = {
-        "Parametre": [p[0] for p in params],
-        "Değer": [p[1] for p in params],
-    }
+    df = pd.DataFrame(params, columns=["Parametre", "Değer"])
 
     desc = f"""
     Rüzgar Yükü Analizi - TS EN 1991-1-4
@@ -65,28 +188,20 @@ def get_parameters_report(building) -> ReportDataFrame:
     Not: Referans yükseklik olarak mahya seviyesi (z₂) kullanılmıştır.
     """
 
-    return ReportDataFrame(
-        data, custom_title="Rüzgar Yükü Parametreleri", custom_desc=desc,
-    )
+    return ReportDataFrame(df, title="Rüzgar Yükü Parametreleri", description=desc)
 
-# ================================================================
-# ORTAK YARDIMCILAR
-# ================================================================
 
 def _first(v):
-    """Tuple ise ilk elemanı, değilse kendisini döner."""
-    return v[0] if isinstance(v, tuple) else v
+    return v[0] if isinstance(v, (tuple, list, np.ndarray)) else v
 
 
 def _second(v):
-    """Tuple ise ikinci elemanı, değilse 0 döner."""
-    return v[1] if isinstance(v, tuple) else 0
+    return v[1] if isinstance(v, (tuple, list, np.ndarray)) and len(v) > 1 else 0.0
 
-def _iter_zones(results) -> Iterable:
-    """Tüm sonuçlardaki yüzeylerde bulunan Zone nesnelerini düz olarak gezer."""
+
+def _iter_zones(results):
     for bund in results:
         all_surfaces = getattr(bund, "all_surfaces", None) or {}
-
         for surf in all_surfaces.values():
             for zone in getattr(surf, "zones", None) or []:
                 yield zone
@@ -101,10 +216,6 @@ def _as_3d(vec) -> np.ndarray:
     return np.array([1.0, 0.0, 0.0])
 
 
-# ================================================================
-# TABLOLAR
-# ================================================================
-
 _TYPE_ABBR = {
     "WALL": "W",
     "MONOPITCH": "M",
@@ -112,32 +223,23 @@ _TYPE_ABBR = {
     "HIPPED": "H",
 }
 
-def create_cpe_summary_df(zones) -> ReportDataFrame:
 
+def create_cpe_summary_df(zones, engine) -> ReportDataFrame:
     rows = []
-
     for zone in zones:
-
-        cpe10_min = float(_first(zone.cpe10))
-        cpe10_max = float(_second(zone.cpe10))
-
-        cpe1_min = float(_first(zone.cpe1))
-        cpe1_max = float(_second(zone.cpe1))
-
         rows.append({
             "Bölge": zone.label,
             "Yüzey": zone.surface,
             "Tablo": zone.table_type,
             "Yön": zone.table_type_dir,
             "Eğim": zone.pitch,
-            "Cpe,10 min": cpe10_min,
-            "Cpe,10 max": cpe10_max,
-            "Cpe,1 min": cpe1_min,
-            "Cpe,1 max": cpe1_max,
+            "Cpe,10 min": float(_first(zone.cpe10)),
+            "Cpe,10 max": float(_second(zone.cpe10)),
+            "Cpe,1 min": float(_first(zone.cpe1)),
+            "Cpe,1 max": float(_second(zone.cpe1)),
         })
 
-    df = pd.DataFrame(rows)
-    df = df.sort_values("Bölge")
+    df = pd.DataFrame(rows).sort_values("Bölge").reset_index(drop=True)
 
     desc = f"""
     Dış ve Net Basınç Katsayıları Özeti (TS EN 1991-1-4)
@@ -160,15 +262,27 @@ def create_cpe_summary_df(zones) -> ReportDataFrame:
     Not: Net katsayılar w = q_p × (c_pe - c_pi) bağıntısına esas oluşturmak üzere hesaplanmıştır.
     """
 
-    return ReportDataFrame(
+    graphic = show_zones(zones, engine)
+
+    report = ReportDataFrame(
         df,
-        custom_title="Dış ve Net Basınç Katsayıları (Cpe & Cp,net)",
-        custom_desc=desc,
+        title="Dış ve Net Basınç Katsayıları (Cpe & Cp,net)",
+        description=desc,
+        graphics=[{
+            "image": graphic,
+            "title": "Rüzgar Bölgesi Grafiği",
+            "description": "Tablo ile ilişkili örnek grafik."
+        }]
     )
+
+    return report
 
 
 def create_wind_force_df(zones, engine) -> ReportDataFrame:
     q_p = engine.q_p
+
+    def _f(cpe, cpi):
+        return round(q_p * (cpe - cpi), 3)
 
     rows = []
     for zone in zones:
@@ -177,27 +291,21 @@ def create_wind_force_df(zones, engine) -> ReportDataFrame:
         cpe1_min = float(_first(zone.cpe1))
         cpe1_max = float(_second(zone.cpe1))
 
-        def _f(cpe, cpi):
-            return q_p * (cpe - cpi)
+        rows.append({
+            "Bölge": zone.label,
+            "Type": _TYPE_ABBR.get(zone.table_type, zone.table_type),
+            "Pitch": round(float(zone.pitch), 3),
+            "F10PMn (kN/m²)": _f(cpe10_min, CPI_POSITIVE),
+            "F10NMn (kN/m²)": _f(cpe10_min, CPI_NEGATIVE),
+            "F10PMx (kN/m²)": _f(cpe10_max, CPI_POSITIVE),
+            "F10NMx (kN/m²)": _f(cpe10_max, CPI_NEGATIVE),
+            "F1PMn (kN/m²)": _f(cpe1_min, CPI_POSITIVE),
+            "F1NMn (kN/m²)": _f(cpe1_min, CPI_NEGATIVE),
+            "F1PMx (kN/m²)": _f(cpe1_max, CPI_POSITIVE),
+            "F1NMx (kN/m²)": _f(cpe1_max, CPI_NEGATIVE),
+        })
 
-        rows.append(
-            {
-                "Bölge": zone.label,
-                "Type": _TYPE_ABBR.get(zone.table_type, zone.table_type),
-                "Pitch": round(float(zone.pitch), 3),
-                "F10PMn (kN/m²)": round(_f(cpe10_min, CPI_POSITIVE), 3),
-                "F10NMn (kN/m²)": round(_f(cpe10_min, CPI_NEGATIVE), 3),
-                "F10PMx (kN/m²)": round(_f(cpe10_max, CPI_POSITIVE), 3),
-                "F10NMx (kN/m²)": round(_f(cpe10_max, CPI_NEGATIVE), 3),
-                "F1PMn (kN/m²)": round(_f(cpe1_min, CPI_POSITIVE), 3),
-                "F1NMn (kN/m²)": round(_f(cpe1_min, CPI_NEGATIVE), 3),
-                "F1PMx (kN/m²)": round(_f(cpe1_max, CPI_POSITIVE), 3),
-                "F1NMx (kN/m²)": round(_f(cpe1_max, CPI_NEGATIVE), 3),
-            }
-        )
-
-    df = pd.DataFrame(rows)
-    df = df.sort_values("Bölge")
+    df = pd.DataFrame(rows).sort_values("Bölge").reset_index(drop=True)
 
     desc = f"""
     Rüzgar Yükü ve Tasarım Basınçları (TS EN 1991-1-4)
@@ -223,135 +331,7 @@ def create_wind_force_df(zones, engine) -> ReportDataFrame:
     """
 
     return ReportDataFrame(
-        df, custom_title="Tasarım Rüzgar Yükleri (kN/m²)", custom_desc=desc
+        df,
+        title="Tasarım Rüzgar Yükleri (kN/m²)",
+        description=desc
     )
-
-
-def show_zones(zones, building):
-
-    # ---- Zone objelerini tek geçişte topla ----
-    zone_records = []  # (coords, label, cpe_scalar)
-    cpe10_values = []
-
-    for zone_obj in zones:
-        coords = np.asarray(zone_obj.coords, dtype=float)
-        cpe = zone_obj.cpe10
-        current_cpe = cpe[0] if isinstance(cpe, (tuple, list, np.ndarray)) else cpe
-        zone_records.append((coords, zone_obj.label, float(current_cpe)))
-        cpe10_values.append(float(current_cpe))
-
-    if not zone_records:
-        raise ValueError("all_wind_zones boş!")
-
-    # ---- Bina bounding box ----
-    b_coords = np.array(list(building.points.values()), dtype=float)
-    min_b = b_coords.min(axis=0)
-    max_b = b_coords.max(axis=0)
-    mid_b = (min_b + max_b) / 2
-
-    # ---- Plot sınırları ----
-    all_coords = np.vstack([r[0] for r in zone_records])
-    mins = all_coords.min(axis=0)
-    maxs = all_coords.max(axis=0)
-    ranges = maxs - mins
-    max_range = max(ranges) if max(ranges) > 0 else 1.0
-    mid_plot = (mins + maxs) / 2
-
-    # ---- Figür ----
-    x_range, y_range, z_range = ranges
-    aspect_xy = x_range / max(y_range, 1e-9)
-    fig_width = float(np.clip(8 * aspect_xy, 8, 16))
-    fig = plt.figure(figsize=(fig_width, 8), dpi=150)
-    ax = fig.add_subplot(111, projection="3d")
-
-    ax.set_xlim(mid_plot[0] - max_range / 2, mid_plot[0] + max_range / 2)
-    ax.set_ylim(mid_plot[1] - max_range / 2, mid_plot[1] + max_range / 2)
-    ax.set_zlim(mid_plot[2] - max_range / 2, mid_plot[2] + max_range / 2)
-    ax.set_box_aspect([x_range, y_range, z_range])  # gerçek oran
-
-    # ---- Renk normalizasyonu ----
-    neg_cpe = [v for v in cpe10_values if v < 0]
-    pos_cpe = [v for v in cpe10_values if v > 0]
-    min_neg_abs = abs(min(neg_cpe)) if neg_cpe else 1.0
-    max_pos = max(pos_cpe) if pos_cpe else 1.0
-
-    neg_cmap = matplotlib.colormaps.get_cmap("Blues")
-    pos_cmap = matplotlib.colormaps.get_cmap("Reds")
-    neutral_color = (0.85, 0.85, 0.85, 1.0)
-
-    # ---- Poligonları çiz ----
-    for coords, label, cpe in zone_records:
-        if cpe < 0:
-            facecolor = neg_cmap(abs(cpe) / min_neg_abs)
-        elif cpe > 0:
-            facecolor = pos_cmap(cpe / max_pos)
-        else:
-            facecolor = neutral_color
-
-        col = Poly3DCollection(
-            [coords],
-            alpha=0.6,
-            facecolor=facecolor,
-            edgecolor="black",
-            linewidths=1.0,
-        )
-        ax.add_collection3d(col)
-
-        # Etiket
-        pts = coords[:-1] if np.allclose(coords[0], coords[-1], atol=1e-9) else coords
-        centroid = pts.mean(axis=0)
-        ax.text(
-            centroid[0], centroid[1], centroid[2],
-            f"{label} ({cpe:.2f})",
-            fontsize=8, fontweight="bold", color="black",
-            ha="center", va="center",
-            bbox=dict(boxstyle="round,pad=0.2", facecolor="white",
-                      edgecolor="gray", alpha=0.7, linewidth=0.5),
-        )
-
-    # ---- Rüzgar oku ----
-    wind_vector = np.asarray(building.w_dir, dtype=float)
-    w_norm = np.linalg.norm(wind_vector)
-    if w_norm < 1e-9:
-        wind_dir_norm = np.array([1.0, 0.0, 0.0])
-    else:
-        wind_dir_norm = wind_vector / w_norm
-
-    arrow_length = max_range / 3
-    b_size = max_b - min_b
-
-    # Rüzgarın geldiği yönün tersine, bina yüzeyinin merkezinden başlat
-    # Okun başlangıcı: rüzgar yönünün tersi yönde, bina sınırının dışında
-    face_center = mid_b.copy()
-    dominant_axis = int(np.argmax(np.abs(wind_dir_norm)))
-    if np.abs(wind_dir_norm[dominant_axis]) > 1e-6:
-        sign = np.sign(wind_dir_norm[dominant_axis])
-        # Rüzgarın geldiği taraf: binanın -sign tarafı
-        face_center[dominant_axis] = mid_b[dominant_axis] - sign * b_size[dominant_axis] / 2
-        # Biraz daha dışarı çıkar
-        face_center[dominant_axis] -= sign * arrow_length * 0.5
-    else:
-        face_center[dominant_axis] = mid_plot[dominant_axis] - max_range / 2
-
-    ax.quiver(
-        face_center[0], face_center[1], face_center[2],
-        wind_dir_norm[0] * arrow_length,
-        wind_dir_norm[1] * arrow_length,
-        wind_dir_norm[2] * arrow_length,
-        color="red", arrow_length_ratio=0.3, linewidth=2,
-    )
-
-    # ---- Temizle ----
-    ax.set_axis_off()
-    ax.grid(False)
-
-    # ---- Kaydet ----
-    img_stream = io.BytesIO()
-    plt.savefig(
-        img_stream, format="png",
-        bbox_inches="tight", pad_inches=0,
-        transparent=True, dpi=300,
-    )
-    plt.close(fig)
-    img_stream.seek(0)
-    return img_stream
