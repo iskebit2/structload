@@ -112,80 +112,91 @@ class ReportDataFrame(pd.DataFrame):
         self[numeric_cols] = self[numeric_cols].round(decimals)
         return self
 
-    def to_markdown(self, *args, **kwargs) -> str:
-        lines = []
-
-        if self.custom_title:
-            lines.append(f"## {self.custom_title}")
-
-        if self.custom_desc:
-            lines.append(f"*{self.custom_desc}*")
-
-        if self.empty:
-            lines.append("Gösterilecek veri bulunamadı.")
-            return "\n".join(lines)
-
-        cols = [str(col) for col in self.columns]
-        lines.append("| " + " | ".join(cols) + " |")
-        lines.append("| " + " | ".join("---" for _ in cols) + " |")
-
-        if self.column_descriptions:
-            descs = [self.column_descriptions.get(col, "") for col in self.columns]
-            lines.append("| " + " | ".join(descs) + " |")
-
-        if self.column_units:
-            units = [self.column_units.get(col, "") for col in self.columns]
-            lines.append("| " + " | ".join(units) + " |")
-
-        for _, row in self.iterrows():
-            lines.append("| " + " | ".join(self._format_row(row)) + " |")
-
-        return "\n".join(lines)
-
     def _repr_html_(self) -> str:
+        import base64
         from html import escape
 
         parts = []
 
-        if self.custom_title:
-            parts.append(f"<h4>{escape(str(self.custom_title))}</h4>")
+        # 1. Başlık (Title)
+        if getattr(self, "custom_title", None):
+            parts.append(f"<h4 style='margin-bottom: 5px;'>{escape(str(self.custom_title))}</h4>")
 
-        if self.custom_desc:
-            parts.append(f"<p>{escape(str(self.custom_desc))}</p>")
+        # 2. Açıklama (Desc)
+        if getattr(self, "custom_desc", None):
+            parts.append(f"<p style='margin-top: 0; margin-bottom: 10px;'>{escape(str(self.custom_desc))}</p>")
 
+        # 3. Görseller (Image)
+        graphics = getattr(self, "graphics", [])
+        for graphic in graphics:
+            graphic_title = graphic.get("title")
+            graphic_desc = graphic.get("description")
+
+            if graphic_title:
+                parts.append(f"<h5 style='margin-bottom: 3px;'>{escape(str(graphic_title))}</h5>")
+            if graphic_desc:
+                parts.append(f"<p style='margin-top: 0; margin-bottom: 8px; font-size: 0.9em;'>{escape(str(graphic_desc))}</p>")
+
+            img_stream = graphic.get("image") or graphic.get("data")
+            if img_stream:
+                if hasattr(img_stream, "seek"):
+                    img_stream.seek(0)
+                    img_bytes = img_stream.read()
+                elif isinstance(img_stream, bytes):
+                    img_bytes = img_stream
+                else:
+                    img_bytes = None
+
+                if img_bytes:
+                    base64_img = base64.b64encode(img_bytes).decode("utf-8")
+                    parts.append(
+                        f'<div style="display: block; margin-bottom: 15px;">'
+                        f'<img src="data:image/png;base64,{base64_img}" style="display: block; max-width: 100%; height: auto;" />'
+                        f'</div>'
+                    )
+
+        # 4. Tablo (Tablo)
         if self.empty:
             parts.append("<p>Gösterilecek veri bulunamadı.</p>")
             return "".join(parts)
 
-        html = ["<table><thead><tr>"]
+        html = ["<table border='1' style='border-collapse: collapse; width: 100%; display: table; clear: both; margin-top: 10px;'><thead>"]
+        
+        # 1. Satır: Kolon Başlıkları
+        html.append("<tr>")
         for col in self.columns:
             html.append(f"<th>{escape(str(col))}</th>")
         html.append("</tr>")
 
-        if self.column_descriptions:
+        # 2. Satır: Kolon Birimleri (column_units) -> Başlıktan hemen sonra!
+        column_units = getattr(self, "column_units", None)
+        if column_units:
             html.append("<tr>")
             for col in self.columns:
-                desc = self.column_descriptions.get(col, "")
-                html.append(f"<th>{escape(str(desc))}</th>")
+                unit = column_units.get(col, "") if isinstance(column_units, dict) else ""
+                html.append(f"<th style='font-weight: normal; font-style: italic;'>{escape(str(unit))}</th>")
             html.append("</tr>")
 
-        if self.column_units:
+        # 3. Satır: Kolon Açıklamaları (column_descriptions)
+        column_descriptions = getattr(self, "column_descriptions", None)
+        if column_descriptions:
             html.append("<tr>")
             for col in self.columns:
-                unit = self.column_units.get(col, "")
-                html.append(f"<th>{escape(str(unit))}</th>")
+                desc = column_descriptions.get(col, "") if isinstance(column_descriptions, dict) else ""
+                html.append(f"<th style='font-weight: normal;'>{escape(str(desc))}</th>")
             html.append("</tr>")
 
         html.append("</thead><tbody>")
 
+        # Veri Satırları
         for _, row in self.iterrows():
             html.append("<tr>")
-            for col, val in row.items():
-                text = self._format_value(col, val)
-                html.append(f"<td>{escape(text)}</td>")
+            values = self._format_row(row) if hasattr(self, "_format_row") else row.values
+            for val in values:
+                html.append(f"<td>{escape(str(val))}</td>")
             html.append("</tr>")
 
-        html.append("tbody></table>")
+        html.append("</tbody></table>")
         parts.append("".join(html))
 
         return "".join(parts)
@@ -197,83 +208,91 @@ class ReportDataFrame(pd.DataFrame):
         desc: Optional[str] = None,
         level: int = 2,
     ) -> None:
-        from docx.shared import Inches, Pt
-
-        final_title = title if title is not None else self.custom_title
-        final_desc = desc if desc is not None else self.custom_desc
+        final_title = title if title is not None else getattr(self, "custom_title", None)
+        final_desc = desc if desc is not None else getattr(self, "custom_desc", None)
 
         if final_title:
-            document.add_heading(final_title, level=level)
+            if hasattr(document, "add_heading_numbered"):
+                document.add_heading_numbered(final_title, level=level)
+            else:
+                document.add_heading(final_title, level=level)
 
         if final_desc:
-            p = document.add_paragraph(final_desc)
-            p.style = document.styles["Normal"]
+            document.add_paragraph(final_desc)
 
         if self.empty:
             document.add_paragraph("Gösterilecek veri bulunamadı.")
             return
 
-        has_descriptions = bool(self.column_descriptions)
-        has_units = bool(self.column_units)
-        extra_rows = int(has_descriptions) + int(has_units)
+        column_units = getattr(self, "column_units", None)
+        column_descriptions = getattr(self, "column_descriptions", None)
 
-        table = document.add_table(
+        has_units = bool(column_units)
+        has_descriptions = bool(column_descriptions)
+        extra_rows = int(has_units) + int(has_descriptions)
+
+        raw_doc = getattr(document, "doc", document)
+
+        table = raw_doc.add_table(
             rows=1 + extra_rows + len(self),
             cols=len(self.columns),
         )
-        table.style = self._table_style
+        table.style = getattr(self, "_table_style", "Table Grid")
 
-        row_index = 0
+        rows_iter = iter(table.rows)
 
+        # 1. Satır: Başlıklar
+        header_cells = next(rows_iter).cells
         for col_index, col in enumerate(self.columns):
-            cell = table.rows[row_index].cells[col_index]
+            cell = header_cells[col_index]
             cell.text = str(col)
-            for run in cell.paragraphs[0].runs:
-                run.bold = True
-                run.font.size = Pt(9)
-        row_index += 1
+            if cell.paragraphs[0].runs:
+                cell.paragraphs[0].runs[0].bold = True
 
-        if has_descriptions:
-            for col_index, col in enumerate(self.columns):
-                table.rows[row_index].cells[col_index].text = str(
-                    self.column_descriptions.get(col, "")
-                )
-            row_index += 1
-
+        # 2. Satır: Birimler (column_units)
         if has_units:
+            unit_cells = next(rows_iter).cells
             for col_index, col in enumerate(self.columns):
-                table.rows[row_index].cells[col_index].text = str(
-                    self.column_units.get(col, "")
-                )
-            row_index += 1
+                val = column_units.get(col, "") if isinstance(column_units, dict) else ""
+                unit_cells[col_index].text = str(val)
 
+        # 3. Satır: Açıklamalar (column_descriptions)
+        if has_descriptions:
+            desc_cells = next(rows_iter).cells
+            for col_index, col in enumerate(self.columns):
+                val = column_descriptions.get(col, "") if isinstance(column_descriptions, dict) else ""
+                desc_cells[col_index].text = str(val)
+
+        # Veri Satırları
         for _, data_row in self.iterrows():
-            values = self._format_row(data_row)
+            row_cells = next(rows_iter).cells
+            values = self._format_row(data_row) if hasattr(self, "_format_row") else data_row.values
             for col_index, value in enumerate(values):
-                table.rows[row_index].cells[col_index].text = value
-            row_index += 1
+                row_cells[col_index].text = str(value)
 
-        for graphic in self.graphics:
-            graphic_title = graphic.get("title")
-            graphic_desc = graphic.get("description")
+        # Görseller
+        graphics = getattr(self, "graphics", [])
+        for graphic in graphics:
+            g_title = graphic.get("title")
+            g_desc = graphic.get("description")
 
-            if graphic_title:
-                p = document.add_paragraph()
-                p.add_run(graphic_title).bold = True
+            if g_title:
+                p = raw_doc.add_paragraph()
+                p.add_run(g_title).bold = True
+            if g_desc:
+                raw_doc.add_paragraph(g_desc)
 
-            if graphic_desc:
-                document.add_paragraph(graphic_desc)
+            img_stream = graphic.get("image") or graphic.get("data")
+            if img_stream:
+                if hasattr(img_stream, "seek"):
+                    img_stream.seek(0)
+                width_cm = graphic.get("width_cm", 15.0)
+                if hasattr(document, "add_image"):
+                    document.add_image(img_stream, width_cm=width_cm)
+                else:
+                    raw_doc.add_picture(img_stream, width=int(width_cm * 360000))
 
-            data = graphic["data"]
-            data.seek(0)
-
-            width = Inches(graphic["width"]) if graphic.get("width") else None
-            height = Inches(graphic["height"]) if graphic.get("height") else None
-
-            document.add_picture(data, width=width, height=height)
-            document.add_paragraph()
-
-        document.add_paragraph()
+        raw_doc.add_paragraph()
 
     def print(self) -> None:
         if self.custom_title:

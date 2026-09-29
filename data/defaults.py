@@ -1,6 +1,5 @@
 from data.material_data import MATERIAL_LIBRARY
 
-
 proje_data = {
 "proje_bilgileri": {
 "proje_adi": "Endüstriyel Depo Yapısı",
@@ -11,6 +10,7 @@ proje_data = {
 },
 
 "saha_ve_deprem": {
+    
 "zemin_sinifi": "ZD",
 "ks_yatak_katsayisi_kN_m3": 15000,
 },
@@ -31,6 +31,7 @@ proje_data = {
 "Ct": 1.0
 },
 "earthquake_config": {
+"structure_type":"steel_frame",
 "R": 2.5,
 "D": 2.5,
 "I": 1.2,

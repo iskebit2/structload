@@ -188,7 +188,7 @@ def get_parameters_report(building) -> ReportDataFrame:
     Not: Referans yükseklik olarak mahya seviyesi (z₂) kullanılmıştır.
     """
 
-    return ReportDataFrame(df, title="Rüzgar Yükü Parametreleri", description=desc)
+    return ReportDataFrame(df, custom_title="Rüzgar Yükü Parametreleri", custom_desc=desc)
 
 
 def _first(v):
@@ -263,11 +263,11 @@ def create_cpe_summary_df(zones, engine) -> ReportDataFrame:
     """
 
     graphic = show_zones(zones, engine)
-
+    
     report = ReportDataFrame(
         df,
-        title="Dış ve Net Basınç Katsayıları (Cpe & Cp,net)",
-        description=desc,
+        custom_title="Dış ve Net Basınç Katsayıları (Cpe & Cp,net)",
+        custom_desc=desc,
         graphics=[{
             "image": graphic,
             "title": "Rüzgar Bölgesi Grafiği",
@@ -332,6 +332,6 @@ def create_wind_force_df(zones, engine) -> ReportDataFrame:
 
     return ReportDataFrame(
         df,
-        title="Tasarım Rüzgar Yükleri (kN/m²)",
-        description=desc
+        custom_title="Tasarım Rüzgar Yükleri (kN/m²)",
+        custom_desc=desc
     )

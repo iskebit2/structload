@@ -1,9 +1,7 @@
 import numpy as np
 
-from docx.shared import Cm
-from data.material_data import MATERIAL_LIBRARY
-from utils.my_document import myDocument
-from windcalc.report import create_cpe_summary_df, create_wind_force_df, get_parameters_report, show_zones
+
+from windcalc.report import create_cpe_summary_df, create_wind_force_df, get_parameters_report
 from windcalc.wind_analyzer import WindAnalyzer
 from windcalc.windengine import WindEngine
 from data.defaults import proje_data
@@ -86,7 +84,7 @@ class WindReport:
             engine = result["engine"]
 
             report[w_key] = {
-                "cpe": create_cpe_summary_df(zones),
+                "cpe": create_cpe_summary_df(zones, engine),
                 "wind_force": create_wind_force_df(
                     zones,
                     engine,
