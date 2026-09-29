@@ -1,4 +1,3 @@
-#utils/report_dataframe.py
 from __future__ import annotations
 
 from io import BytesIO
@@ -25,7 +24,7 @@ class ReportDataFrame(pd.DataFrame):
         self.column_units = kwargs.pop("column_units", {})
         self.column_formats = kwargs.pop("column_formats", {})
         self._table_style = kwargs.pop("table_style", "Table Grid")
-        self.graphics = kwargs.pop("graphics", [])
+        self.graphics = kwargs.pop("graphics", []) or []
 
         super().__init__(*args, **kwargs)
 
@@ -33,13 +32,13 @@ class ReportDataFrame(pd.DataFrame):
     def _constructor(self):
         def _c(*args, **kwargs):
             df = ReportDataFrame(*args, **kwargs)
-            df.custom_title = self.custom_title
-            df.custom_desc = self.custom_desc
-            df.column_descriptions = self.column_descriptions.copy()
-            df.column_units = self.column_units.copy()
-            df.column_formats = self.column_formats.copy()
-            df._table_style = self._table_style
-            df.graphics = [graphic.copy() for graphic in self.graphics]
+            df.custom_title = getattr(self, "custom_title", None)
+            df.custom_desc = getattr(self, "custom_desc", None)
+            df.column_descriptions = getattr(self, "column_descriptions", {}).copy()
+            df.column_units = getattr(self, "column_units", {}).copy()
+            df.column_formats = getattr(self, "column_formats", {}).copy()
+            df._table_style = getattr(self, "_table_style", "Table Grid")
+            df.graphics = [g.copy() for g in getattr(self, "graphics", [])]
             return df
 
         return _c
@@ -60,22 +59,26 @@ class ReportDataFrame(pd.DataFrame):
 
     def add_graphic(
         self,
-        data: BytesIO | bytes,
+        data: BytesIO | bytes | None = None,
+        image: BytesIO | bytes | None = None,
         title: Optional[str] = None,
         description: Optional[str] = None,
         width: Optional[float] = None,
         height: Optional[float] = None,
         format: str = "png",
     ) -> ReportDataFrame:
-        if isinstance(data, bytes):
-            data = BytesIO(data)
+        img_data = data if data is not None else image
 
-        if not isinstance(data, BytesIO):
-            raise TypeError("Graphic data BytesIO veya bytes olmalıdır.")
+        if isinstance(img_data, bytes):
+            img_data = BytesIO(img_data)
+
+        if not isinstance(img_data, BytesIO):
+            raise TypeError("Görsel verisi BytesIO veya bytes türünde olmalıdır.")
 
         self.graphics.append(
             {
-                "data": data,
+                "data": img_data,
+                "image": img_data,
                 "title": title,
                 "description": description,
                 "width": width,
@@ -118,15 +121,15 @@ class ReportDataFrame(pd.DataFrame):
 
         parts = []
 
-        # 1. Başlık (Title)
+        # 1. Başlık
         if getattr(self, "custom_title", None):
             parts.append(f"<h4 style='margin-bottom: 5px;'>{escape(str(self.custom_title))}</h4>")
 
-        # 2. Açıklama (Desc)
+        # 2. Açıklama
         if getattr(self, "custom_desc", None):
             parts.append(f"<p style='margin-top: 0; margin-bottom: 10px;'>{escape(str(self.custom_desc))}</p>")
 
-        # 3. Görseller (Image)
+        # 3. Görseller
         graphics = getattr(self, "graphics", [])
         for graphic in graphics:
             graphic_title = graphic.get("title")
@@ -155,20 +158,20 @@ class ReportDataFrame(pd.DataFrame):
                         f'</div>'
                     )
 
-        # 4. Tablo (Tablo)
+        # 4. Tablo
         if self.empty:
             parts.append("<p>Gösterilecek veri bulunamadı.</p>")
             return "".join(parts)
 
         html = ["<table border='1' style='border-collapse: collapse; width: 100%; display: table; clear: both; margin-top: 10px;'><thead>"]
         
-        # 1. Satır: Kolon Başlıkları
+        # Kolon Başlıkları
         html.append("<tr>")
         for col in self.columns:
             html.append(f"<th>{escape(str(col))}</th>")
         html.append("</tr>")
 
-        # 2. Satır: Kolon Birimleri (column_units) -> Başlıktan hemen sonra!
+        # Birimler
         column_units = getattr(self, "column_units", None)
         if column_units:
             html.append("<tr>")
@@ -177,7 +180,7 @@ class ReportDataFrame(pd.DataFrame):
                 html.append(f"<th style='font-weight: normal; font-style: italic;'>{escape(str(unit))}</th>")
             html.append("</tr>")
 
-        # 3. Satır: Kolon Açıklamaları (column_descriptions)
+        # Açıklamalar
         column_descriptions = getattr(self, "column_descriptions", None)
         if column_descriptions:
             html.append("<tr>")
@@ -241,7 +244,7 @@ class ReportDataFrame(pd.DataFrame):
 
         rows_iter = iter(table.rows)
 
-        # 1. Satır: Başlıklar
+        # 1. Başlıklar
         header_cells = next(rows_iter).cells
         for col_index, col in enumerate(self.columns):
             cell = header_cells[col_index]
@@ -249,14 +252,14 @@ class ReportDataFrame(pd.DataFrame):
             if cell.paragraphs[0].runs:
                 cell.paragraphs[0].runs[0].bold = True
 
-        # 2. Satır: Birimler (column_units)
+        # 2. Birimler
         if has_units:
             unit_cells = next(rows_iter).cells
             for col_index, col in enumerate(self.columns):
                 val = column_units.get(col, "") if isinstance(column_units, dict) else ""
                 unit_cells[col_index].text = str(val)
 
-        # 3. Satır: Açıklamalar (column_descriptions)
+        # 3. Açıklamalar
         if has_descriptions:
             desc_cells = next(rows_iter).cells
             for col_index, col in enumerate(self.columns):

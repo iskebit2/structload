@@ -1,18 +1,10 @@
-import io
+from io import BytesIO
 import numpy as np
 import pandas as pd
 from PIL import Image as PILImage, ImageDraw, ImageFont
 
 from data.wind_data import CPI_NEGATIVE, CPI_POSITIVE
 from utils.report_dataframe import ReportDataFrame
-
-
-def image_to_bytes(image):
-    stream = io.BytesIO()
-    image.save(stream, format="PNG")
-    stream.seek(0)
-    return stream
-
 
 def show_zones(zones, building, size=800):
     zone_records = []
@@ -140,12 +132,11 @@ def show_zones(zones, building, size=800):
         left = (p2[0] - ux * size_arrow - uy * size_arrow * 0.5, p2[1] - uy * size_arrow + ux * size_arrow * 0.5)
         right = (p2[0] - ux * size_arrow + uy * size_arrow * 0.5, p2[1] - uy * size_arrow - ux * size_arrow * 0.5)
         draw.polygon([p2, left, right], fill=(220, 30, 30, 255))
-
-    img_stream = io.BytesIO()
-    image.save(img_stream, format="PNG")
-    img_stream.seek(0)
-
-    return image
+    
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer
 
 
 def get_parameters_report(building) -> ReportDataFrame:
@@ -187,8 +178,13 @@ def get_parameters_report(building) -> ReportDataFrame:
 
     Not: Referans yükseklik olarak mahya seviyesi (z₂) kullanılmıştır.
     """
-
-    return ReportDataFrame(df, custom_title="Rüzgar Yükü Parametreleri", custom_desc=desc)
+    return ReportDataFrame(
+                            df,
+                            custom_title="Rüzgar Yükü Parametreleri",
+                            custom_desc=desc,
+                            column_descriptions={"Parametre": "Hesap Parametresi", "Değer": "Hesaplanan Değer"},
+                            column_units={"Parametre": "-", "Değer": "-"}
+                        )
 
 
 def _first(v):
