@@ -1,164 +1,291 @@
 # data/material_data.py
 """
-Ölü Yük Verileri - TS 498 / TS EN 1991-1-1
+Yük ve Malzeme Veritabanı (TS 498 / TS EN 1991-1-1 Uyumlu)
 
-REFACTORED:
-- MATERIAL_LIBRARY: Her malzeme için weight + unit ('volumetric' | 'area') + name
-- MATERIAL_WEIGHTS: Eski API ile uyumluluk için otomatik türetilir.
-                    ('volumetric' → kN/m³ ağırlık, 'area' → kN/m² alan yükü)
+Birim Standartları:
+- Volumetric : kN/m³ (Kalınlık 'm' ile çarpılarak alansal yüke çevrilir)
+- Area       : kN/m² (Doğrudan alansal yük olarak eklenir)
+- Live Loads : kN/m² (Doğrudan yönetmelik standart değerleri)
 """
+# ============================================================================
+# 1. ÖLÜ YÜKLER (TS 498 / TS EN 1991-1-1) - NET YÖNETMELİK DEĞERLERİ
+# ============================================================================
+
+# data/material_data.py
+
+DEAD_LOAD_PRESETS = {
+    "mese_parke": {
+        "name": "Sert Ahşap Meşe Parke Kaplama Döşeme Yükü",
+        "details": [
+            {"label": "18 mm Meşe Parke",     "mat": "ahşap_meşe",     "thickness_m": 0.018},
+            {"label": "Parke Altı Şilte",     "custom_weight": 0.01,   "unit": "area"},
+            {"label": "4 cm Tesviye Şapı",    "mat": "şap",            "thickness_m": 0.04},
+            {"label": "1.5 cm Tavan Sıvası",  "mat": "sıva_alçı",      "thickness_m": 0.015},
+        ],
+    },
+    "marley": {
+        "name": "Marley Kaplama Döşeme Yükü",
+        "details": [
+            {"label": "2 cm Çimento Harcı",   "mat": "çimento_harcı",  "thickness_m": 0.02},
+            {"label": "3 cm Tesviye Şapı",    "mat": "şap",            "thickness_m": 0.03},
+            {"label": "1.5 cm Tavan Sıvası",  "mat": "sıva_alçı",      "thickness_m": 0.015},
+            {"label": "Marley Kaplama",       "custom_weight": 0.05,   "unit": "area"},
+        ],
+    },
+    "fayans": {
+        "name": "Fayans / Seramik Kaplama Döşeme Yükü",
+        "details": [
+            {"label": "1 cm Seramik",         "mat": "seramik_kaplama", "custom_weight": 0.25, "unit": "area"},
+            {"label": "2.5 cm Yapıştırma Harcı", "mat": "çimento_harcı", "thickness_m": 0.025},
+            {"label": "4 cm Tesviye Şapı",    "mat": "şap",            "thickness_m": 0.04},
+            {"label": "1.5 cm Tavan Sıvası",  "mat": "sıva_alçı",      "thickness_m": 0.015},
+        ],
+    },
+    "merdiven": {
+        "name": "Merdiven Kaplama ve Basamak Yükü",
+        "details": [
+            {"label": "3 cm Mermer",          "mat": "mermer",         "thickness_m": 0.03},
+            {"label": "3 cm Harç",            "mat": "çimento_harcı",  "thickness_m": 0.03},
+            {"label": "2 cm Alt Sıva",        "mat": "sıva_alçı",      "thickness_m": 0.02},
+        ],
+    },
+}
 
 # ============================================================================
-# 1. MALZEME KÜTÜPHANESİ (Birim bilgili)
+# 2. HAREKETLİ YÜKLER (TS 498 / TS EN 1991-1-1) - NET YÖNETMELİK DEĞERLERİ
 # ============================================================================
-# 'volumetric' -> kN/m³ (Kalınlıkla çarpılacak)
-# 'area'       -> kN/m² (Doğrudan eklenecek)
+
+LIVE_LOADS = {
+    "kullanici_tanimli": {
+        "name": "Kullanıcı Tanımlı",
+        "value": 2.0,
+        "cat": "A",
+        "desc": "Özel yük tanımı"
+    },
+    "konut": {
+        "name": "Konut, teras, oda ve koridorlar",
+        "value": 2.0,
+        "cat": "A",
+        "desc": "Ev, otel odaları, hastane koğuşları"
+    },
+    "konut_dukkan": {
+        "name": "Konutlarda 50 m²'ye kadar dükkanlar / hastane odaları",
+        "value": 2.0,
+        "cat": "A",
+        "desc": "Küçük ölçekli ticari veya sağlık alanları"
+    },
+    "ofis": {
+        "name": "Büro ve genel çalışma alanları",
+        "value": 3.5,
+        "cat": "B",
+        "desc": "Ofisler, bürolar, doktor muayenehaneleri"
+    },
+    "hastane_servis": {
+        "name": "Hastane mutfakları, ameliyathane ve poliklinikler",
+        "value": 3.5,
+        "cat": "B",
+        "desc": "Yoğun donanımlı sağlık birimleri"
+    },
+    "sinif": {
+        "name": "Sınıflar, amfiler, yatakhaneler ve okul koridorları",
+        "value": 3.5,
+        "cat": "C1",
+        "desc": "Eğitim yapıları"
+    },
+    "konut_merdiveni": {
+        "name": "Konut merdivenleri ve sahanlıklar",
+        "value": 3.5,
+        "cat": "A",
+        "desc": "Bina içi düşey sirkülasyon"
+    },
+    "toplanti_sabit": {
+        "name": "Tiyatrolar, sinemalar, sabit koltuklu salonlar",
+        "value": 5.0,
+        "cat": "C2",
+        "desc": "Sabit oturma düzenli toplanma alanları"
+    },
+    "toplanti_serbest": {
+        "name": "Camiler, lokantalar, bekleme ve dans salonları",
+        "value": 5.0,
+        "cat": "C3",
+        "desc": "Serbest hareketli toplanma alanları"
+    },
+    "magaza": {
+        "name": "Mağazalar, teşhir salonları ve fırınlar",
+        "value": 5.0,
+        "cat": "D1",
+        "desc": "Perakende alışveriş alanları"
+    },
+    "spor_sergi": {
+        "name": "Spor, dans, sergi salonları ve pazar yerleri",
+        "value": 5.0,
+        "cat": "C5",
+        "desc": "Fiziksel aktivite ve kalabalık alanları"
+    },
+    "kutuphane_arsiv": {
+        "name": "Kütüphaneler, arşivler ve evrak depoları",
+        "value": 5.0,
+        "cat": "E",
+        "desc": "Ağır istifleme yapılan alanlar"
+    },
+    "buyuk_mutfak": {
+        "name": "Büyük mutfaklar, kantinler ve mezbahalar",
+        "value": 5.0,
+        "cat": "C3",
+        "desc": "Endüstriyel servis alanları"
+    },
+    "merdiven_umumi": {
+        "name": "Umumi yapılarda merdivenler ve girişler",
+        "value": 5.0,
+        "cat": "C3",
+        "desc": "Yoğun yaya trafiği olan merdivenler"
+    },
+    "balkon": {
+        "name": "Balkonlar (10 m²'ye kadar)",
+        "value": 5.0,
+        "cat": "A",
+        "desc": "Konsol ve açık alanlar"
+    },
+    "tribun_hareketli": {
+        "name": "Tribünler (oturma yeri sabit olmayan)",
+        "value": 7.5,
+        "cat": "C4",
+        "desc": "Dinamik kalabalık yükleri"
+    },
+    "garaj_hafif": {
+        "name": "Garajlar (toplam ağırlığı <= 2.5 ton araçlar)",
+        "value": 5.0,
+        "cat": "F",
+        "desc": "Binek araç otoparkları"
+    },
+}
+
+
+# ============================================================================
+# 3. MALZEME KÜTÜPHANESİ (Hacimsel: kN/m³ | Alansal: kN/m²)
+# ============================================================================
 
 MATERIAL_LIBRARY = {
-    # --- AHŞAP MALZEMELER (Hacimsel: kN/m³) ---
+    # --- AHŞAP MALZEMELER (kN/m³) ---
     "ahşap_çam":        {"weight": 5.0,  "unit": "volumetric", "name": "Çam Ahşap"},
-    "ahşap_meşe":       {"weight": 6.0,  "unit": "volumetric", "name": "Meşe Ahşap"},
+    "ahşap_meşe":       {"weight": 7.0,  "unit": "volumetric", "name": "Meşe Ahşap"},
     "ahşap_kayın":      {"weight": 7.0,  "unit": "volumetric", "name": "Kayın Ahşap"},
     "ahşap_ladin":      {"weight": 4.5,  "unit": "volumetric", "name": "Ladin Ahşap"},
-    "ahşap_kestane":    {"weight": 6.5,  "unit": "volumetric", "name": "Kestane Ahşap"},
     "ahşap_osb":        {"weight": 6.5,  "unit": "volumetric", "name": "OSB Levha"},
     "ahşap_clt":        {"weight": 5.0,  "unit": "volumetric", "name": "CLT Panel"},
     "ahşap_kontrplak":  {"weight": 6.0,  "unit": "volumetric", "name": "Kontrplak"},
     "ahşap_glulam":     {"weight": 5.0,  "unit": "volumetric", "name": "Glulam"},
-    "ahşap_mdf":        {"weight": 7.0,  "unit": "volumetric", "name": "MDF Levha"},
+    "ahşap_mdf":        {"weight": 7.5,  "unit": "volumetric", "name": "MDF Levha"},
     "ahşap_sunta":      {"weight": 7.0,  "unit": "volumetric", "name": "Sunta"},
-    "ahşap_lvl":        {"weight": 5.5,  "unit": "volumetric", "name": "LVL"},
 
-    # --- BETON & DUVAR (Hacimsel: kN/m³) ---
+    # --- BETON & DUVAR & HARÇLAR (kN/m³) ---
     "betonarme":        {"weight": 25.0, "unit": "volumetric", "name": "Betonarme"},
     "beton_hafif":      {"weight": 18.0, "unit": "volumetric", "name": "Hafif Beton"},
     "gazbeton":         {"weight": 6.0,  "unit": "volumetric", "name": "Gazbeton / Ytong"},
-    "ytong":            {"weight": 6.0,  "unit": "volumetric", "name": "Ytong"},
-    "bims":             {"weight": 10.0, "unit": "volumetric", "name": "Bims"},
+    "bims":             {"weight": 10.0, "unit": "volumetric", "name": "Bims Blok"},
     "tuğla_dolu":       {"weight": 18.0, "unit": "volumetric", "name": "Dolu Harman Tuğlası"},
-    "tuğla_delikli":    {"weight": 14.0, "unit": "volumetric", "name": "Düşey Delikli Tuğla"},
-    "tuğla_hafif":      {"weight": 10.0, "unit": "volumetric", "name": "Hafif Tuğla"},
-    "taş_doğal":        {"weight": 25.0, "unit": "volumetric", "name": "Doğal Taş (Genel)"},
-    "kireçtaşı":        {"weight": 22.0, "unit": "volumetric", "name": "Kireçtaşı / Kalker"},
-    "kalker":           {"weight": 24.0, "unit": "volumetric", "name": "Kalker"},
+    "tuğla_delikli":    {"weight": 12.0, "unit": "volumetric", "name": "Düşey Delikli Tuğla"},
+    "kireçtaşı":        {"weight": 23.0, "unit": "volumetric", "name": "Kireçtaşı / Kalker"},
     "bazalt":           {"weight": 29.0, "unit": "volumetric", "name": "Bazalt"},
     "granit":           {"weight": 28.0, "unit": "volumetric", "name": "Granit"},
     "mermer":           {"weight": 27.0, "unit": "volumetric", "name": "Mermer"},
     "traverten":        {"weight": 24.0, "unit": "volumetric", "name": "Traverten"},
-    "kumtaşı":          {"weight": 23.0, "unit": "volumetric", "name": "Kumtaşı"},
-    "şap":              {"weight": 22.0, "unit": "volumetric", "name": "Şap"},
+    "çimento_harcı":    {"weight": 22.0, "unit": "volumetric", "name": "Çimento Harcı / Seramik Yapıştırıcı"},
+    "şap":              {"weight": 22.0, "unit": "volumetric", "name": "Çimento Esaslı Şap"},
     "şap_anhidrit":     {"weight": 20.0, "unit": "volumetric", "name": "Anhidrit Şap"},
-    "seramik":          {"weight": 22.0, "unit": "volumetric", "name": "Seramik"},
-    "porselen":         {"weight": 24.0, "unit": "volumetric", "name": "Porselen"},
-    "cam":              {"weight": 25.0, "unit": "volumetric", "name": "Cam"},
-    "sıva":             {"weight": 20.0, "unit": "volumetric", "name": "Sıva (Genel)"},
     "sıva_kireç":       {"weight": 18.0, "unit": "volumetric", "name": "Kireç Harçlı Sıva"},
-    "sıva_çimento":     {"weight": 22.0, "unit": "volumetric", "name": "Çimento Harçlı Sıva"},
-    "sıva_alçı":        {"weight": 16.0, "unit": "volumetric", "name": "Alçı Sıva"},
-    "dolgu_kum":        {"weight": 16.0, "unit": "volumetric", "name": "Kum Dolgu"},
-    "dolgu_çakıl":      {"weight": 18.0, "unit": "volumetric", "name": "Çakıl Dolgu"},
-    "parke_masif":      {"weight": 8.0,  "unit": "volumetric", "name": "Masif Parke"},
-    "parke_laminat":    {"weight": 6.0,  "unit": "volumetric", "name": "Laminat Parke"},
+    "sıva_çimento":     {"weight": 21.0, "unit": "volumetric", "name": "Çimento Harçlı Sıva"},
+    "sıva_alçı":        {"weight": 12.0, "unit": "volumetric", "name": "Alçı Sıva"},
+    "dolgu_kum":        {"weight": 17.0, "unit": "volumetric", "name": "Kum Dolgu"},
+    "dolgu_toprak":     {"weight": 18.0, "unit": "volumetric", "name": "Bitkisel Toprak Dolgu"},
 
-    # --- KAPLAMA & YÜZEY YÜKLERİ (Alansal: kN/m²) ---
-    "çatı_kiremidi":        {"weight": 0.5,  "unit": "area", "name": "Kiremit Çatı Kaplaması"},
-    "çatı_sac":             {"weight": 0.15, "unit": "area", "name": "Trapez Sac Kaplama"},
-    "çatı_izolasyon":       {"weight": 0.1,  "unit": "area", "name": "Çatı Isı Yalıtımı"},
-    "çatı_su_yalıtımı":     {"weight": 0.05, "unit": "area", "name": "Çatı Su Yalıtımı"},
-    "çatı_güneş_paneli":    {"weight": 0.15, "unit": "area", "name": "Güneş Paneli"},
-    "asma_tavan":           {"weight": 0.3,  "unit": "area", "name": "Standart Asma Tavan"},
-    "asma_tavan_ahşap":     {"weight": 0.25, "unit": "area", "name": "Ahşap Asma Tavan"},
-    "asma_tavan_alüminyum": {"weight": 0.2,  "unit": "area", "name": "Alüminyum Asma Tavan"},
-    "halı":                 {"weight": 0.15, "unit": "area", "name": "Halı Kaplama"},
-    "halı_yün":             {"weight": 0.2,  "unit": "area", "name": "Yün Halı"},
-    "linolyum":             {"weight": 0.1,  "unit": "area", "name": "Linolyum"},
-    "vinil":                {"weight": 0.1,  "unit": "area", "name": "Vinil Kaplama"},
-    "hafif_bölme":          {"weight": 0.5,  "unit": "area", "name": "Hafif Bölme Duvar"},
-    "agir_bölme":           {"weight": 2.0,  "unit": "area", "name": "Ağır Bölme Duvar"},
-    "bölme_alçıpan":        {"weight": 0.3,  "unit": "area", "name": "Alçıpan Bölme"},
-    "bölme_cam":            {"weight": 0.5,  "unit": "area", "name": "Cam Bölme"},
-    "kar_tutucu":           {"weight": 0.1,  "unit": "area", "name": "Kar Tutucu Sistem"},
-    "su_yalıtımı_membran":  {"weight": 0.04, "unit": "area", "name": "Bitümlü Membran"},
-    "su_yalıtımı":          {"weight": 0.05, "unit": "area", "name": "Su Yalıtımı"},
-    "izolasyon_eps":        {"weight": 0.3,  "unit": "area", "name": "EPS Isı Yalıtımı"},
-    "izolasyon_xps":        {"weight": 0.4,  "unit": "area", "name": "XPS Isı Yalıtımı"},
-    "izolasyon_taş":        {"weight": 0.3,  "unit": "area", "name": "Taş Yünü Yalıtım"},
-    "cephe_taş":            {"weight": 1.2,  "unit": "area", "name": "Mekanik Askılı Taş Cephe"},
-    "cephe_mermer":         {"weight": 1.0,  "unit": "area", "name": "Mermer Cephe"},
-    "cephe_kompozit":       {"weight": 0.4,  "unit": "area", "name": "Alüminyum Kompozit Cephe"},
-    "cephe_cam":            {"weight": 0.8,  "unit": "area", "name": "Giydirme Cam Cephe"},
-    "cephe_ahşap":          {"weight": 0.3,  "unit": "area", "name": "Ahşap Cephe"},
-    "cephe_metal":          {"weight": 0.5,  "unit": "area", "name": "Metal Cephe"},
-    "cephe_tuğla":          {"weight": 0.8,  "unit": "area", "name": "Tuğla Cephe"},
-    "cephe_sıva":           {"weight": 0.4,  "unit": "area", "name": "Sıvalı Cephe"},
-    "cephe_seramik":        {"weight": 0.6,  "unit": "area", "name": "Seramik Cephe"},
+    # --- ISITMA & YALITIM MALZEMELERİ (Düzeltildi: Hacimsel Yoğunluk kN/m³) ---
+    "izolasyon_xps":    {"weight": 0.4,  "unit": "volumetric", "name": "XPS Isı Yalıtımı"},
+    "izolasyon_eps":    {"weight": 0.3,  "unit": "volumetric", "name": "EPS Isı Yalıtımı"},
+    "izolasyon_taş":    {"weight": 1.2,  "unit": "volumetric", "name": "Taş Yünü Yalıtım"},
+
+    # --- KAPLAMA & BİTİŞ YÜZEYLERİ (Alansal: kN/m²) ---
+    "seramik_kaplama":   {"weight": 0.25, "unit": "area", "name": "Seramik / Karo Kaplama (Harçlı)"},
+    "parke_laminat":     {"weight": 0.10, "unit": "area", "name": "Laminat Parke + Şilte"},
+    "parke_masif":       {"weight": 0.20, "unit": "area", "name": "Masif Ahşap Parke"},
+    "halı":              {"weight": 0.05, "unit": "area", "name": "Halı / Linolyum"},
+    "yükseltilmiş_panel": {"weight": 0.25, "unit": "area", "name": "Yükseltilmiş Döşeme Paneli"},
+    "çatı_kiremidi":     {"weight": 0.45, "unit": "area", "name": "Kiremit Çatı Kaplaması"},
+    "çatı_sac":          {"weight": 0.12, "unit": "area", "name": "Trapez Sac Kaplama"},
+    "çatı_güneş_paneli": {"weight": 0.20, "unit": "area", "name": "Güneş Paneli Sistemi"},
+    "asma_tavan_alçıpan":{"weight": 0.15, "unit": "area", "name": "Alçıpan Asma Tavan"},
+    "asma_tavan_metal":  {"weight": 0.10, "unit": "area", "name": "Metal / Modüler Asma Tavan"},
+    "bölme_alçıpan":     {"weight": 0.30, "unit": "area", "name": "Alçıpan Bölme Duvar"},
+    "su_yalıtımı_membran":{"weight": 0.08, "unit": "area", "name": "Bitümlü Su Yalıtım Membranı"},
+    "cephe_taş_mekanik": {"weight": 0.80, "unit": "area", "name": "Mekanik Askılı Taş Cephe"},
+    "cephe_kompozit":    {"weight": 0.15, "unit": "area", "name": "Alüminyum Kompozit Cephe"},
+    "cephe_cam":         {"weight": 0.45, "unit": "area", "name": "Giydirme Cam Cephe"},
 }
 
-
 # ============================================================================
-# 2. GERİYE UYUMLULUK: MATERIAL_WEIGHTS
+# 4. DUVAR YÜKLERİ
 # ============================================================================
-# Eski kodlar `MATERIAL_WEIGHTS[malzeme]` çağırıyordu; ağırlık döner.
-# Otomatik türetiyoruz, böylece LoadComponent.calculate() bozulmaz.
 
-MATERIAL_WEIGHTS = {
-    key: mat["weight"]
-    for key, mat in MATERIAL_LIBRARY.items()
+WALL_PRESETS = {
+    # --- İç duvarlar ---
+    "ic_duvar_alcipan": {
+        "name": "Alçıpan İç Duvar (75 mm)",
+        "details": [
+            {"label": "Alçıpan (çift yüz)", "custom_weight": 0.30, "unit": "area"},
+            {"label": "Metal Profil",       "custom_weight": 0.05, "unit": "area"},
+            {"label": "Taş Yünü Dolgu",     "mat": "izolasyon_taş", "thickness_m": 0.075},
+        ],
+    },
+    "ic_duvar_tugla": {
+        "name": "Delikli Tuğla İç Duvar (13.5 cm)",
+        "details": [
+            {"label": "Delikli Tuğla", "mat": "tuğla_delikli", "thickness_m": 0.135},
+            {"label": "İki Yüz Sıva",  "mat": "sıva_alçı",      "thickness_m": 0.03},
+        ],
+    },
+
+    # --- Dış duvarlar ---
+    "dis_duvar_yarim_tugla": {
+        "name": "Yarım Tuğla Dış Duvar + Yalıtım",
+        "details": [
+            {"label": "Tuğla Duvar",     "mat": "tuğla_delikli",  "thickness_m": 0.135},
+            {"label": "Taş Yünü Yalıtım", "mat": "izolasyon_taş",  "thickness_m": 0.08},
+            {"label": "İç Sıva",         "mat": "sıva_çimento",   "thickness_m": 0.02},
+            {"label": "Dış Sıva",        "mat": "sıva_çimento",   "thickness_m": 0.015},
+        ],
+    },
+    "dis_duvar_beton": {
+        "name": "Betonarme Dış Duvar (20 cm)",
+        "details": [
+            {"label": "Betonarme",       "mat": "betonarme",      "thickness_m": 0.20},
+            {"label": "İç Sıva",         "mat": "sıva_çimento",   "thickness_m": 0.02},
+            {"label": "Dış Sıva",        "mat": "sıva_çimento",   "thickness_m": 0.015},
+        ],
+    },
+    "dis_duvar_gazbeton": {
+        "name": "Gazbeton Dış Duvar (25 cm)",
+        "details": [
+            {"label": "Gazbeton Blok",   "mat": "gazbeton",       "thickness_m": 0.25},
+            {"label": "İç Sıva",         "mat": "sıva_alçı",      "thickness_m": 0.02},
+            {"label": "Dış Sıva",        "mat": "sıva_çimento",   "thickness_m": 0.015},
+        ],
+    },
 }
 
+# ============================================================================
+# 5. GERİYE UYUMLULUK VE YARDIMCI METOTLAR
+# ============================================================================
 
-# ============================================================================
-# 3. YARDIMCI FONKSİYONLAR (Yeni API)
-# ============================================================================
+MATERIAL_WEIGHTS = {key: mat["weight"] for key, mat in MATERIAL_LIBRARY.items()}
 
 def get_material_info(key: str) -> dict:
-    """Malzemenin tam bilgisini döner."""
     if key not in MATERIAL_LIBRARY:
-        raise KeyError(f"Tanımsız malzeme: {key}")
+        raise KeyError(f"Tanımsız malzeme anahtarı: '{key}'")
     return MATERIAL_LIBRARY[key]
 
-
-def get_material_unit(key: str) -> str:
-    """'volumetric' veya 'area'."""
-    return get_material_info(key)["unit"]
-
-
-def get_material_display_name(key: str) -> str:
-    """Kullanıcıya gösterilecek isim."""
-    return get_material_info(key)["name"]
-
-
-def is_volumetric(key: str) -> bool:
-    return get_material_unit(key) == "volumetric"
-
-
-def is_area_load(key: str) -> bool:
-    return get_material_unit(key) == "area"
-
-
-# ============================================================================
-# 4. HAREKETLİ YÜKLER (TS 498) - DEĞİŞMEDİ
-# ============================================================================
-
-LIVE_LOADS = {
-    "kullanici_tanimli": {"name": "Kullanıcı Tanımlı", "value": 1.961},
-    "konut": {"name": "Konut, teras, oda ve koridorlar", "value": 1.961},
-    "konut_dukkan": {"name": "Konutlarda 50 m²'ye kadar dükkanlar / hastane odaları", "value": 1.961},
-    "hastane": {"name": "Hastane mutfakları, muayene ve poliklinik odaları", "value": 3.432},
-    "sinif": {"name": "Sınıflar, amfiler, yatakhaneler", "value": 3.432},
-    "konut_merdiveni": {"name": "Konut merdivenleri", "value": 3.432},
-    "cami": {"name": "Camiler", "value": 4.903},
-    "tiyatro_sinema": {"name": "Tiyatrolar ve sinemalar", "value": 4.903},
-    "magaza": {"name": "Mağazalar", "value": 4.903},
-    "toplanti": {"name": "Toplantı ve bekleme salonları", "value": 4.903},
-    "spor_sergi": {"name": "Spor, dans ve sergi salonları", "value": 4.903},
-    "tribun_sabit": {"name": "Tribünler, sabit oturma", "value": 4.903},
-    "lokanta": {"name": "Lokantalar", "value": 4.903},
-    "kutuphane": {"name": "Kütüphaneler", "value": 4.903},
-    "arsiv": {"name": "Arşivler", "value": 4.903},
-    "hafif_atolye": {"name": "Hafif ağırlıklı atölyeler", "value": 4.903},
-    "buyuk_mutfak": {"name": "Büyük mutfaklar, kantinler", "value": 4.903},
-    "merdiven_umumi": {"name": "Umumi yapılarda merdivenler", "value": 4.903},
-    "tribun_hareketli": {"name": "Tribünler, sabit olmayan oturma", "value": 7.355},
-    "garaj": {"name": "Garajlar, toplam ağırlığı 2.5 tona kadar araçlar", "value": 4.903},
-}
+def get_live_load_info(key: str) -> dict:
+    if key not in LIVE_LOADS:
+        raise KeyError(f"Tanımsız hareketli yük anahtarı: '{key}'")
+    item = LIVE_LOADS[key]
+    return {'name': key, 'value':round(item["value"], 2), 'cat': item["cat"],'desc':item["name"]}
+    

@@ -5,12 +5,12 @@ proje_data = {
 "proje_adi": "Endüstriyel Depo Yapısı",
 "ada_parsel": "102 / 14",
 "muhendis": "Engineer",
-"tarih": "",
+"tarih": " ",
 "revizyon": "R0",
 },
 
 "saha_ve_deprem": {
-    
+
 "zemin_sinifi": "ZD",
 "ks_yatak_katsayisi_kN_m3": 15000,
 },
@@ -80,59 +80,66 @@ proje_data = {
 },
 
 "malzemeler": {
-"beton": "C30/37",
-"donati": "B420C",
-"yapisal_celik": "S355",
+# "beton": "C30/37",
+# "donati": "B420C",
+# "yapisal_celik": "S355",
 "ahsap": "C24",
 "panel": "OSB/3",
 },
 
-"yukler": {
-"olu_yukler_G": {
-"cati_kaplamasi": {
-"toplam_yuk": 0.45,
-"birim": "kN/m²",
-"details": [
+# --- Ölü yükler (döşeme/kaplama) ---
+"dead_loads": [
+"marley",
+"fayans",
+"mese_parke",
 {
-"ad": "Kiremit Kaplama",
-"malzeme_ref": MATERIAL_LIBRARY.get("kiremit"),
-"thickness_m": 0.02,
-"hesaplanan_yuk_kN_m2": 0.38,
-},
-{
-"ad": "Isı Yalıtımı (Taşyünü)",
-"malzeme_ref": MATERIAL_LIBRARY.get("tasyunu"),
-"thickness_m": 0.10,
-"hesaplanan_yuk_kN_m2": 0.05,
-},
-{
-"ad": "OSB Alt Kaplama",
-"malzeme_ref": MATERIAL_LIBRARY.get("osb_3"),
-"thickness_m": 0.018,
-"hesaplanan_yuk_kN_m2": 0.117,
+"kullanici_tanimli": [
+{"label": "Mermer Kaplama", "mat": "mermer", "thickness_m": 0.02},
+{"label": "Tesviye Şapı",   "mat": "şap",    "thickness_m": 0.04},
+]
 },
 ],
+
+# --- Hareketli yükler ---
+"live_loads": ["konut", "balkon"],
+
+# --- Duvarlar (kiriş üstü) ---
+"duvarlar": [
+{
+"id": "D1",
+"preset": "ic_duvar_tugla",
+"aciklama": "Zemin kat iç bölme",
+"wall_height_m": 3.0,
+"beam_depth_m": 0.4,
+"opening_ratio": 0.0,
 },
-"tesisat_ve_asma_tavan": {
-"toplam_yuk": 0.15,
-"birim": "kN/m²",
-"details": [
-{"ad": "Aydınlatma ve Kanal Tesisatı", "hesaplanan_yuk_kN_m2": 0.10},
-{"ad": "Asma Tavan Profilleri", "hesaplanan_yuk_kN_m2": 0.05},
+{
+"id": "D2",
+"preset": "dis_duvar_yarim_tugla",
+"aciklama": "Kuzey cephe dış duvar",
+"wall_height_m": 3.0,
+"beam_depth_m": 0.4,
+"opening_ratio": 0.15,
+},
+{
+"id": "D3",
+"preset": "dis_duvar_beton",
+"aciklama": "Depo dış duvarı (betonarme)",
+"wall_height_m": 4.5,
+"beam_depth_m": 0.6,
+"opening_ratio": 0.10,
+},
+{
+"id": "D4",
+"preset": "ic_duvar_alcipan",
+"aciklama": "Ofis iç bölme",
+"wall_height_m": 3.0,
+"beam_depth_m": 0.5,
+"opening_ratio": 0.0,
+},
 ],
-}
-},
 
-"hareketli_yukler_Q": {
-"cati_bakim": {
-"qk": 0.75,
-"birim": "kN/m²",
-"psi_2_katilim_katsayisi": 0.3,
-"description": "TS EN 1991-1-1 Ulaşılamayan çatı yükü (Kategori H)",
-}
-},
-
-
+#yükleme
 
 "load_cases":{
 "dead_load_cases": [],
@@ -143,6 +150,5 @@ proje_data = {
 "wind_load_combs": [],
 "snow_load_cases": [],
 "snow_load_combs": []
-}
 }
 }
